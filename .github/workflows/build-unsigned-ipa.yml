@@ -1,0 +1,55 @@
+# Builds an unsigned CourseNotes.ipa on a GitHub-hosted Mac, so you can develop on Windows and
+# side-load with AltStore or SideStore (they re-sign the app with your own Apple ID).
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (Release, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project CourseNotes.xcodeproj \
+            -scheme CourseNotes \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/CourseNotes.app Payload/
+          zip -qry CourseNotes-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CourseNotes-unsigned-ipa
+          path: CourseNotes-unsigned.ipa
+          retention-days: 14
