@@ -40,7 +40,16 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build
+            build 2>&1 | tee xcodebuild.log
+
+      # Shows compiler errors at the top of the run page instead of deep in the build log.
+      - name: Report compile errors
+        if: failure()
+        run: |
+          errors=$(grep -E ": error: " xcodebuild.log | sed "s|$GITHUB_WORKSPACE/||" | sort -u | head -40)
+          if [ -n "$errors" ]; then
+            echo "::error title=Compile errors::$(echo "$errors" | sed ':a;N;$!ba;s/\n/%0A/g')"
+          fi
 
       - name: Package IPA
         run: |
