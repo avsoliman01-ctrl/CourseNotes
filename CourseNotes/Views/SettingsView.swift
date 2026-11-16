@@ -53,6 +53,19 @@ struct SettingsView: View {
                     Text("When Apple Pencil hovers, the reticle shows the tip's footprint for your current tilt and a tick that follows barrel roll. It is hidden when hover previews are turned off in your iPad's Apple Pencil settings.")
                 }
 
+                Section {
+                    Toggle("Hold to Correct Shapes", isOn: pencil.preference(\.shapeHoldEnabled))
+                    Picker("Handwriting Smoothing", selection: pencil.preference(\.smoothing)) {
+                        ForEach(SmoothingStrength.allCases) { strength in
+                            Text(strength.title).tag(strength)
+                        }
+                    }
+                } header: {
+                    Text("Drawing Assistance")
+                } footer: {
+                    Text("Shapes: draw a rough line, circle, rectangle or triangle and keep the pencil still for half a second. Smoothing evens out tremor and jagged curves when you pause; it never rewrites or recognizes your handwriting. Undo restores a stroke exactly as you drew it.")
+                }
+
                 Section("New Notes") {
                     Picker("Default Paper", selection: $defaultTemplate) {
                         ForEach(PaperTemplate.allCases) { template in

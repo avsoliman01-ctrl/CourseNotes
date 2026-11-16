@@ -25,7 +25,12 @@ struct LibraryRootView: View {
                     path.append(NoteRoute(noteID: noteID))
                 }
                 .navigationDestination(for: NoteRoute.self) { route in
-                    NoteEditorView(noteID: route.noteID, dataManager: data)
+                    // Creating a note inside the editor swaps the route rather than stacking editors;
+                    // the id makes SwiftUI build a fresh editor (and flush the old one) for each note.
+                    NoteEditorView(noteID: route.noteID, dataManager: data) { newNoteID in
+                        path = [NoteRoute(noteID: newNoteID)]
+                    }
+                    .id(route.noteID)
                 }
             }
         }

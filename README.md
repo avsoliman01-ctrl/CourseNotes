@@ -18,6 +18,12 @@ hover, barrel roll and Pencil haptics.
   - Haptics play through the pencil. On iPad, `UICanvasFeedbackGenerator` is the feedback type
     Apple Pencil Pro plays. `UIImpactFeedbackGenerator` and `UISelectionFeedbackGenerator` are
     triggered too, and the system skips whatever the hardware can't play.
+- **Lasso editing**: select strokes, then move, resize, recolor, duplicate or delete them. Edits change
+  the real stroke geometry, so they save, undo and export like any other ink.
+- **Pages**: every note opens with two pages of paper and grows as you scroll or write.
+- **Floating palette**: drag it anywhere, pin it, or collapse it to a small button.
+- **Shape correction**: draw a rough shape and hold the pencil still to snap it to a clean one.
+- **Handwriting smoothing** (optional): evens out tremor and jagged curves without rewriting anything.
 - **Storage**: `PKDrawing` binary data plus JSON metadata on disk. The library is visible in the
   Files app, and you can export a one-tap backup zip. Notes export as multi-page PDFs.
 
@@ -45,7 +51,11 @@ note_app/
     ├── Canvas/
     │   ├── PencilCanvasView.swift      UIViewRepresentable + coordinator (PencilKit, pencil
     │   │                               interaction, hover, haptics) and CanvasController
-    │   └── CanvasViews.swift           Paper background, transparent canvas, hover reticle
+    │   ├── CanvasViews.swift           Paper background, page allocation, canvas, hover reticle
+    │   ├── LassoSelection.swift        Custom lasso: select, move, resize, recolor (with undo)
+    │   ├── InkAssistant.swift          Hold detection, shape preview, smoothing scheduling
+    │   ├── ShapeRecognizer.swift       Geometric classifier: line, ellipse, polygon, polyline
+    │   └── StrokeProcessing.swift      Stroke smoothing and shape-to-ink conversion
     ├── Views/
     │   ├── SidebarView.swift           NavigationSplitView root + sidebar
     │   ├── DashboardView.swift         Course grid, module chips, searchable notes grid/list
@@ -53,7 +63,9 @@ note_app/
     │   ├── LibraryForms.swift          Semester/course/module forms, delete confirmation, sheet routing
     │   ├── NoteForms.swift             New note, note details, template picker
     │   ├── NoteEditorView.swift        Canvas workspace + view model (autosave, PDF export)
-    │   ├── ToolPaletteView.swift       Floating palette (adapts to narrow windows)
+    │   ├── ToolPaletteView.swift       Tool palette contents (full, compact and vertical layouts)
+    │   ├── FloatingPalette.swift       Draggable, pinnable, hideable palette container
+    │   ├── SelectionToolbarView.swift  Lasso action bar + on-device text recognition
     │   ├── RadialPaletteView.swift     Squeeze palette + gesture toasts
     │   ├── SettingsView.swift          Pencil gestures, drawing, defaults, backup
     │   └── ActivityView.swift          Share sheet
@@ -237,6 +249,32 @@ produces an **unsigned** `.ipa`, which AltStore or SideStore re-sign with your o
 | Undo / redo | Palette buttons, ⌘Z / ⇧⌘Z on a keyboard |
 | Search | Type in the search bar and use the scopes (All, Title, Course, Tag). `#midterm` searches tags only. |
 | Rename, tag or move a note | Long-press its card, or tap the title in the editor |
+| New note while writing | Tap **+** in the editor's toolbar. The sheet starts on the current course and module, the open note is saved, and the new note opens. |
+| Scroll ahead | Every note has at least two pages. Scroll down before writing; another page is added whenever you get near the end. Dashed lines mark where PDF pages break. |
+| Move the palette | Drag it by the grip (≡) at its leading end. Against the left or right edge it turns vertical. |
+| Pin or hide the palette | **Pin** locks it in place. The **chevron** collapses it to a small pencil button; tap that to bring it back. Position, pin and hidden state are remembered. |
+| Select ink | Choose the lasso, then circle strokes with the pencil, or tap a single stroke. Tap empty paper or **Done** to deselect. |
+| Move or resize a selection | Drag inside the box to move. Drag a corner handle to resize proportionally, or an edge handle to stretch one direction. |
+| Recolor, duplicate, delete | Use the bar that appears at the bottom while ink is selected. |
+| Read handwriting as text | Select ink, then tap **Recognize Text** in that bar. Review and correct the result, then copy it. |
+| Correct a shape | Draw a rough line, circle, ellipse, rectangle, triangle or simple polygon, then hold the pencil still for half a second. A clean preview appears; keep holding and move to adjust it, then lift. |
+| Smooth handwriting | Settings › Drawing Assistance › Handwriting Smoothing (Off, Subtle, Medium, Strong) |
+
+### Notes on the drawing-assistance features
+
+- **Undo order.** Shape correction and smoothing are applied as their own undo steps. The first Undo
+  restores the stroke exactly as you drew it; the next removes it.
+- **Shape correction only runs on a deliberate hold.** The stroke must fit a line, ellipse or
+  polygon within a tight error bound. Anything uncertain is left as drawn. Turn it off in
+  Settings › Drawing Assistance.
+- **Smoothing is signal smoothing, not handwriting rewriting.** It filters tremor out of each
+  stroke's path, pins stroke ends and sharp corners, and skips small marks such as dots and
+  decimal points. It does not recognize, respell or restyle what you write.
+- **Text recognition reads; it does not replace.** Apple's Vision framework recognizes the selected
+  handwriting on the iPad so you can copy it. Notes store ink only, so there is no typed-text object
+  to put in its place. Vision is not reliable for mathematical notation.
+- **Apple's own Smart Script** (handwriting refinement in the Notes app) has no public API and
+  cannot be enabled in third-party apps.
 
 ## Data and backups
 
