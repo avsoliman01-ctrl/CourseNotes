@@ -48,7 +48,7 @@ jobs:
         run: |
           errors=$(grep -E ": error: " xcodebuild.log | sed "s|$GITHUB_WORKSPACE/||" | sort -u | head -40)
           if [ -n "$errors" ]; then
-            echo "::error title=Compile errors::$(echo "$errors" | sed ':a;N;$!ba;s/\n/%0A/g')"
+            echo "::error title=Compile errors::$(echo "$errors" | awk '{printf "%s%%0A", $0}')"
           fi
 
       - name: Package IPA
