@@ -72,9 +72,14 @@ struct NoteEditorView: View {
     @State private var viewModel: NoteEditorViewModel
     @State private var canvasController = CanvasController()
     @State private var showingDetails = false
+    @State private var showingNewNote = false
 
-    init(noteID: UUID, dataManager: CourseDataManager) {
+    /// Replaces this editor with another note (used after creating a note from here).
+    private let openNote: (UUID) -> Void
+
+    init(noteID: UUID, dataManager: CourseDataManager, openNote: @escaping (UUID) -> Void) {
         _viewModel = State(initialValue: NoteEditorViewModel(noteID: noteID, data: dataManager))
+        self.openNote = openNote
     }
 
     var body: some View {
@@ -102,9 +107,14 @@ struct NoteEditorView: View {
         ZStack(alignment: .top) {
             canvas(for: note)
 
-            ToolPaletteView(controller: canvasController)
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
+            FloatingPalette(controller: canvasController)
+
+            if canvasController.selectionCount > 0 {
+                SelectionToolbarView(controller: canvasController)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 18)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
 
             if let toast = pencil.toast {
                 PencilToastView(toast: toast)
@@ -117,12 +127,20 @@ struct NoteEditorView: View {
             }
         }
         .animation(.snappy(duration: 0.25), value: pencil.toast)
+        .animation(.snappy(duration: 0.25), value: canvasController.selectionCount > 0)
         .navigationTitle(titleBinding(for: note))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarRole(.editor)
         .toolbar { toolbar(for: note) }
         .sheet(isPresented: $showingDetails) {
             NoteDetailsSheet(noteID: note.id)
+        }
+        .sheet(isPresented: $showingNewNote) {
+            // Same sheet as the dashboard, preselecting this note's course and module.
+            NewNoteSheet(courseID: data.module(id: note.moduleID)?.courseID, moduleID: note.moduleID) { newNoteID in
+                viewModel.saveNow()
+                openNote(newNoteID)
+            }
         }
         .sheet(item: $viewModel.shareItem) { item in
             ActivityView(activityItems: [item.url])
@@ -138,6 +156,8 @@ struct NoteEditorView: View {
                 tool: pencil.currentConfiguration,
                 drawingPolicy: pencil.preferences.fingerDrawing.drawingPolicy,
                 showsHoverReticle: pencil.preferences.showsHoverReticle,
+                shapeHoldEnabled: pencil.preferences.shapeHoldEnabled,
+                smoothing: pencil.preferences.smoothing,
                 controller: canvasController,
                 pencil: pencil,
                 onDrawingChange: viewModel.drawingChanged
@@ -162,6 +182,13 @@ struct NoteEditorView: View {
     @ToolbarContentBuilder
     private func toolbar(for note: NoteDocument) -> some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
+            Button {
+                viewModel.saveNow()
+                showingNewNote = true
+            } label: {
+                Label("New Note", systemImage: "plus")
+            }
+
             Menu {
                 Picker("Paper", selection: templateBinding(for: note)) {
                     ForEach(PaperTemplate.allCases) { template in

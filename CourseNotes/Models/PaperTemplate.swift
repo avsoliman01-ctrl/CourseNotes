@@ -7,8 +7,12 @@ enum CanvasMetrics {
     static let pageWidth: CGFloat = 1024
     /// Height of one exported PDF page (US Letter aspect ratio).
     static let pageHeight: CGFloat = pageWidth * 11 / 8.5
-    /// Blank space kept below the lowest stroke so there is always room to keep writing.
-    static let overscrollHeight: CGFloat = 600
+    /// Pages of writing space every note has from the moment it opens, even when blank.
+    static let minimumPages = 2
+    /// Blank pages always kept below the last page that contains ink.
+    static let blankPagesBelowInk = 1
+    /// Upper bound on scroll space. Pages are only scroll extent, not memory, but not infinite.
+    static let maximumPages = 400
     /// How far the user can pinch-zoom in, relative to "page fits width".
     static let maximumZoomMultiplier: CGFloat = 4
     /// Aspect ratio (width / height) of dashboard thumbnails.

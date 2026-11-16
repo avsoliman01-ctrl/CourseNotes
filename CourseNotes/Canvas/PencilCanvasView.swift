@@ -9,8 +9,33 @@ final class CanvasController {
     private(set) var canUndo = false
     private(set) var canRedo = false
     private(set) var isRulerActive = false
+    /// Number of strokes currently selected with the lasso (0 when there is no selection).
+    fileprivate(set) var selectionCount = 0
 
     @ObservationIgnored fileprivate weak var container: CanvasContainerView?
+
+    // MARK: Lasso selection
+
+    func recolorSelection(_ color: RGBAColor) {
+        container?.selection.recolorSelection(color.uiColor)
+    }
+
+    func deleteSelection() {
+        container?.selection.deleteSelection()
+    }
+
+    func duplicateSelection() {
+        container?.selection.duplicateSelection()
+    }
+
+    func clearSelection() {
+        container?.selection.clearSelection()
+    }
+
+    /// The selected ink rendered on white, for handwriting recognition.
+    func selectionImage() -> UIImage? {
+        container?.selection.selectionImage()
+    }
 
     /// The ink currently on screen, including strokes not yet autosaved.
     var currentDrawing: PKDrawing? { container?.canvasView.drawing }
@@ -55,6 +80,8 @@ struct PencilCanvasView: UIViewRepresentable {
     let tool: ToolConfiguration
     let drawingPolicy: PKCanvasViewDrawingPolicy
     let showsHoverReticle: Bool
+    let shapeHoldEnabled: Bool
+    let smoothing: SmoothingStrength
     let controller: CanvasController
     let pencil: ApplePencilManager
     let onDrawingChange: @MainActor (PKDrawing) -> Void
@@ -85,7 +112,23 @@ struct PencilCanvasView: UIViewRepresentable {
         let hover = UIHoverGestureRecognizer(target: coordinator, action: #selector(Coordinator.handleHover(_:)))
         container.addGestureRecognizer(hover)
 
+        let controller = self.controller
         controller.container = container
+        container.selection.allowsFingerInput = drawingPolicy == .anyInput
+        container.selection.onSelectionChange = { [weak controller] count in
+            if controller?.selectionCount != count { controller?.selectionCount = count }
+        }
+        container.selection.onCommit = { [weak coordinator] in
+            coordinator?.drawingCommitted()
+        }
+        container.assistant.onCommit = { [weak coordinator] in
+            coordinator?.drawingCommitted()
+        }
+        container.assistant.onShapeRecognized = { location in
+            HapticEngine.shared.shapeRecognized(at: location)
+        }
+        coordinator.configureAssistant(in: container)
+        coordinator.lastStrokeCount = initialDrawing.strokes.count
         coordinator.observeUndo(of: canvas)
         HapticEngine.shared.attach(to: container)
         return container
@@ -98,6 +141,8 @@ struct PencilCanvasView: UIViewRepresentable {
         if container.canvasView.drawingPolicy != drawingPolicy {
             container.canvasView.drawingPolicy = drawingPolicy
         }
+        container.selection.allowsFingerInput = drawingPolicy == .anyInput
+        context.coordinator.configureAssistant(in: container)
         if !showsHoverReticle {
             container.reticleView.hide()
         }
@@ -115,6 +160,8 @@ struct PencilCanvasView: UIViewRepresentable {
         var parent: PencilCanvasView
         weak var container: CanvasContainerView?
 
+        /// Stroke count after the last committed change, to spot a newly written stroke.
+        var lastStrokeCount = 0
         private var appliedTool: ToolConfiguration?
         private var undoObservers: [NSObjectProtocol] = []
         /// Where the pencil is hovering right now (container coordinates), if it is.
@@ -129,6 +176,20 @@ struct PencilCanvasView: UIViewRepresentable {
             appliedTool = tool
             container.canvasView.tool = tool.pkTool
             container.reticleView.configure(for: tool)
+            // The lasso is this app's own selection layer; it takes the pencil while active.
+            container.selection.setEnabled(tool.kind == .lasso)
+            configureAssistant(in: container)
+        }
+
+        /// Shape correction and smoothing follow the current settings and only apply to ink tools.
+        func configureAssistant(in container: CanvasContainerView) {
+            let assistant = container.assistant!
+            assistant.isShapeHoldEnabled = parent.shapeHoldEnabled
+            assistant.smoothing = parent.smoothing
+            assistant.allowsFingerInput = parent.drawingPolicy == .anyInput
+            assistant.isInkingToolActive = parent.tool.kind.isInking
+            assistant.previewColor = parent.tool.color.uiColor
+            assistant.previewWidth = parent.tool.width
         }
 
         func observeUndo(of canvasView: PKCanvasView) {
@@ -148,6 +209,9 @@ struct PencilCanvasView: UIViewRepresentable {
         func tearDown() {
             undoObservers.forEach { NotificationCenter.default.removeObserver($0) }
             undoObservers.removeAll()
+            // Puts back any strokes that are lifted mid-drag before the canvas goes away.
+            container?.selection.clearSelection()
+            container?.assistant.resetPending()
             container?.canvasView.undoManager?.removeAllActions()
             if parent.controller.container === container {
                 parent.controller.container = nil
@@ -157,8 +221,30 @@ struct PencilCanvasView: UIViewRepresentable {
         // MARK: PKCanvasViewDelegate
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-            container?.updateContentSize()
-            parent.onDrawingChange(canvasView.drawing)
+            guard let container else { return }
+            // Lasso edits report through drawingCommitted(); strokes lifted mid-drag are a
+            // transient state that must never reach autosave.
+            if container.selection.isLiftingStrokes || container.selection.isApplyingEdit { return }
+            // Shape correction and smoothing report through drawingCommitted() as well.
+            if container.assistant.isApplyingEdit { return }
+            container.selection.drawingChangedExternally()
+
+            // Exactly one more stroke with an ink tool means the user just finished writing it.
+            let strokeCount = canvasView.drawing.strokes.count
+            if strokeCount == lastStrokeCount + 1, parent.tool.kind.isInking {
+                container.assistant.strokeAdded(at: strokeCount - 1)
+            } else {
+                container.assistant.resetPending()
+            }
+            drawingCommitted()
+        }
+
+        /// The canvas holds a new, complete drawing: resize the page area, autosave, refresh undo.
+        func drawingCommitted() {
+            guard let container else { return }
+            lastStrokeCount = container.canvasView.drawing.strokes.count
+            container.updateContentSize()
+            parent.onDrawingChange(container.canvasView.drawing)
             parent.controller.refreshUndoState()
         }
 
@@ -172,6 +258,7 @@ struct PencilCanvasView: UIViewRepresentable {
         // (Don't implement viewForZooming(in:) — PKCanvasView supplies its own zooming view.)
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            container?.extendPagesIfNeededForScrolling()
             container?.syncPaperWithCanvas()
         }
 

@@ -47,6 +47,15 @@ final class HapticEngine {
         impactGenerator?.prepare()
     }
 
+    /// A held stroke was recognized as a shape. "Path completed" is the canvas feedback Apple
+    /// provides for exactly this moment.
+    func shapeRecognized(at location: CGPoint) {
+        guard isEnabled else { return }
+        canvasGenerator?.pathCompleted(at: location)
+        impactGenerator?.impactOccurred(intensity: 0.7, at: location)
+        canvasGenerator?.prepare()
+    }
+
     /// A tool, color or width was picked in the radial palette.
     func selectionChanged(at location: CGPoint? = nil) {
         guard isEnabled, let point = point(for: location) else { return }

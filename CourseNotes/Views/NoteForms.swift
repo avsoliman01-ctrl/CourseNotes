@@ -48,6 +48,7 @@ struct NewNoteSheet: View {
     @State private var tagsText = ""
     /// nil until the user picks one, so the default from Settings applies.
     @State private var template: PaperTemplate?
+    @State private var didCreate = false
 
     init(courseID: UUID?, moduleID: UUID?, onCreate: @escaping (UUID) -> Void) {
         self.onCreate = onCreate
@@ -116,7 +117,9 @@ struct NewNoteSheet: View {
     }
 
     private func create() {
-        guard let courseID else { return }
+        // A second tap while the sheet is dismissing must not create a duplicate note.
+        guard !didCreate, let courseID else { return }
+        didCreate = true
         let targetModuleID = moduleID ?? data.addModule(courseID: courseID, name: "", kind: .custom).id
         let note = data.createNote(in: targetModuleID, title: title, template: template ?? defaultTemplate,
                                    tags: TagFormatter.parse(tagsText))

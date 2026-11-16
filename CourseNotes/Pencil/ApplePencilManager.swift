@@ -63,8 +63,14 @@ struct PencilPreferences: Equatable {
     var fingerDrawing: FingerDrawingPolicy = .system
     var showsHoverReticle = true
     var hapticsEnabled = true
+    /// Draw a rough shape and hold the pencil still to replace it with a clean one.
+    var shapeHoldEnabled = true
+    /// Handwriting enhancement. Off by default: it changes ink after the fact, so it is opt-in.
+    var smoothing: SmoothingStrength = .off
 
     private enum Key {
+        static let shapeHold = "pencil.shapeHoldEnabled"
+        static let smoothing = "pencil.smoothing"
         static let doubleTap = "pencil.doubleTapBehavior"
         static let squeeze = "pencil.squeezeBehavior"
         static let finger = "pencil.fingerDrawing"
@@ -90,6 +96,12 @@ struct PencilPreferences: Equatable {
         if defaults.object(forKey: Key.haptics) != nil {
             preferences.hapticsEnabled = defaults.bool(forKey: Key.haptics)
         }
+        if defaults.object(forKey: Key.shapeHold) != nil {
+            preferences.shapeHoldEnabled = defaults.bool(forKey: Key.shapeHold)
+        }
+        if let raw = defaults.string(forKey: Key.smoothing), let value = SmoothingStrength(rawValue: raw) {
+            preferences.smoothing = value
+        }
         return preferences
     }
 
@@ -99,6 +111,8 @@ struct PencilPreferences: Equatable {
         defaults.set(fingerDrawing.rawValue, forKey: Key.finger)
         defaults.set(showsHoverReticle, forKey: Key.reticle)
         defaults.set(hapticsEnabled, forKey: Key.haptics)
+        defaults.set(shapeHoldEnabled, forKey: Key.shapeHold)
+        defaults.set(smoothing.rawValue, forKey: Key.smoothing)
     }
 }
 

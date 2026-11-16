@@ -4,11 +4,17 @@ import SwiftUI
 /// Falls back to a compact layout in narrow windows (Split View, Slide Over, Stage Manager).
 struct ToolPaletteView: View {
     let controller: CanvasController
+    /// Vertical when the palette is docked against a side edge (always the compact tool set).
+    var axis: Axis = .horizontal
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            PaletteBar(controller: controller, isCompact: false)
-            PaletteBar(controller: controller, isCompact: true)
+        if axis == .vertical {
+            PaletteBar(controller: controller, isCompact: true, axis: .vertical)
+        } else {
+            ViewThatFits(in: .horizontal) {
+                PaletteBar(controller: controller, isCompact: false, axis: .horizontal)
+                PaletteBar(controller: controller, isCompact: true, axis: .horizontal)
+            }
         }
     }
 }
@@ -16,13 +22,15 @@ struct ToolPaletteView: View {
 private struct PaletteBar: View {
     let controller: CanvasController
     let isCompact: Bool
+    let axis: Axis
 
     @Environment(ApplePencilManager.self) private var pencil
     @State private var showingWidth = false
     @State private var showingEraserOptions = false
 
     var body: some View {
-        HStack(spacing: 2) {
+        let layout = axis == .vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+        layout {
             if isCompact {
                 toolMenu
             } else {
@@ -40,11 +48,7 @@ private struct PaletteBar: View {
             separator
             undoRedo
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.quaternary))
-        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        // Background, drag handle and pin/hide controls are added by FloatingPalette.
         .fixedSize()
     }
 
@@ -179,7 +183,8 @@ private struct PaletteBar: View {
     // MARK: Undo / redo
 
     private var undoRedo: some View {
-        HStack(spacing: 2) {
+        let layout = axis == .vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+        return layout {
             Button {
                 controller.undo()
             } label: {
@@ -208,8 +213,8 @@ private struct PaletteBar: View {
 
     private var separator: some View {
         Divider()
-            .frame(height: 24)
-            .padding(.horizontal, 4)
+            .frame(width: axis == .vertical ? 24 : nil, height: axis == .vertical ? nil : 24)
+            .padding(axis == .vertical ? .vertical : .horizontal, 4)
     }
 }
 

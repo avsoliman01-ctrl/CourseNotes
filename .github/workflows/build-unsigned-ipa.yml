@@ -4,8 +4,9 @@ name: Build unsigned IPA
 
 on:
   workflow_dispatch:
+  # Every branch builds, so work in progress can be compiled before it is merged into main.
   push:
-    branches: [main]
+    branches: ['**']
 
 jobs:
   build:

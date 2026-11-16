@@ -22,6 +22,10 @@ final class CanvasContainerView: UIView {
     let paperView = PaperBackgroundView()
     let canvasView = NoteCanvasView()
     let reticleView = HoverReticleView()
+    /// Custom lasso (select, move, resize, recolor). Its overlay sits between the ink and the reticle.
+    private(set) var selection: LassoSelectionController!
+    /// Hold-to-correct shapes and handwriting smoothing.
+    private(set) var assistant: InkAssistant!
 
     var template: PaperTemplate = .blank {
         didSet {
@@ -48,6 +52,9 @@ final class CanvasContainerView: UIView {
 
         addSubview(paperView)
         addSubview(canvasView)
+        selection = LassoSelectionController(canvasView: canvasView, hostView: self)
+        addSubview(selection.overlay)
+        assistant = InkAssistant(canvasView: canvasView, overlayLayer: selection.overlay.layer)
         addSubview(reticleView)
     }
 
@@ -60,24 +67,51 @@ final class CanvasContainerView: UIView {
         super.layoutSubviews()
         paperView.frame = bounds
         canvasView.frame = bounds
+        selection.overlay.frame = bounds
         reticleView.frame = bounds
         updateZoomForCurrentWidth()
         updateContentSize()
         syncPaperWithCanvas()
     }
 
-    /// Page width × (lowest stroke + overscroll); never shorter than one page or the screen.
+    /// Pages currently available to scroll through. Grows as ink or scrolling nears the end and
+    /// never shrinks while the note is open, so the page under the pencil can't disappear.
+    private var allocatedPages = CanvasMetrics.minimumPages
+
+    /// Whole pages: at least `minimumPages`, and always a blank page below the last inked one.
+    /// Scroll extent no longer depends on where the lowest stroke happens to be.
     func updateContentSize() {
         let zoom = canvasView.zoomScale
         let inkBounds = canvasView.drawing.bounds
         let inkBottom = inkBounds.isNull ? 0 : inkBounds.maxY
-        let pageHeight = max(CanvasMetrics.pageHeight, inkBottom + CanvasMetrics.overscrollHeight) * zoom
-        canvasView.contentSize = CGSize(width: CanvasMetrics.pageWidth * zoom, height: max(pageHeight, bounds.height))
+        let inkedPages = Int((inkBottom / CanvasMetrics.pageHeight).rounded(.up))
+        allocatedPages = min(CanvasMetrics.maximumPages,
+                             max(allocatedPages, CanvasMetrics.minimumPages, inkedPages + CanvasMetrics.blankPagesBelowInk))
+
+        let height = CGFloat(allocatedPages) * CanvasMetrics.pageHeight * zoom
+        let size = CGSize(width: CanvasMetrics.pageWidth * zoom, height: max(height, bounds.height))
+        if canvasView.contentSize != size {
+            canvasView.contentSize = size
+        }
+    }
+
+    /// Adds a page when the visible area gets within half a page of the end, so there is always
+    /// more paper to scroll onto before writing anything.
+    func extendPagesIfNeededForScrolling() {
+        guard allocatedPages < CanvasMetrics.maximumPages else { return }
+        let zoom = max(canvasView.zoomScale, 0.01)
+        let visibleBottom = (canvasView.contentOffset.y + canvasView.bounds.height) / zoom
+        let allocatedBottom = CGFloat(allocatedPages) * CanvasMetrics.pageHeight
+        if visibleBottom > allocatedBottom - CanvasMetrics.pageHeight / 2 {
+            allocatedPages += 1
+            updateContentSize()
+        }
     }
 
     func syncPaperWithCanvas() {
         paperView.update(contentOffset: canvasView.contentOffset, zoomScale: canvasView.zoomScale)
         reticleView.zoomScale = canvasView.zoomScale
+        selection.refreshOverlay()
     }
 
     func zoomToFitWidth(animated: Bool) {
@@ -136,14 +170,14 @@ final class PaperBackgroundView: UIView {
         guard contentOffset != self.contentOffset || zoomScale != self.zoomScale else { return }
         self.contentOffset = contentOffset
         self.zoomScale = zoomScale
-        if template != .blank { setNeedsDisplay() }
+        setNeedsDisplay()
     }
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         PaperStyle.paper.setFill()
         context.fill(rect)
-        guard template != .blank, zoomScale > 0 else { return }
+        guard zoomScale > 0 else { return }
 
         // View point = content point × zoom − offset.
         context.translateBy(x: -contentOffset.x, y: -contentOffset.y)
@@ -153,6 +187,29 @@ final class PaperBackgroundView: UIView {
                                     width: rect.width / zoomScale,
                                     height: rect.height / zoomScale)
         template.draw(in: context, contentRect: visibleContent, zoomScale: zoomScale)
+        drawPageBreaks(in: context, visibleContent: visibleContent)
+    }
+
+    /// Faint dashed rule where one exported PDF page ends and the next begins. Drawn in the same
+    /// content coordinates as the ink and the template, so all three stay aligned at any zoom.
+    private func drawPageBreaks(in context: CGContext, visibleContent: CGRect) {
+        let pageHeight = CanvasMetrics.pageHeight
+        let first = max(1, Int((visibleContent.minY / pageHeight).rounded(.up)))
+        let last = Int((visibleContent.maxY / pageHeight).rounded(.down))
+        guard first <= last else { return }
+
+        let unit = 1 / zoomScale
+        context.saveGState()
+        context.setStrokeColor(UIColor(white: 0.45, alpha: 0.45).cgColor)
+        context.setLineWidth(unit)
+        context.setLineDash(phase: 0, lengths: [8 * unit, 6 * unit])
+        for page in first...last {
+            let y = CGFloat(page) * pageHeight
+            context.move(to: CGPoint(x: max(0, visibleContent.minX), y: y))
+            context.addLine(to: CGPoint(x: min(CanvasMetrics.pageWidth, visibleContent.maxX), y: y))
+        }
+        context.strokePath()
+        context.restoreGState()
     }
 }
 
