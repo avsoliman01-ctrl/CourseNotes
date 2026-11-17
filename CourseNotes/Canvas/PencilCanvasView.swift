@@ -174,7 +174,12 @@ struct PencilCanvasView: UIViewRepresentable {
         func apply(_ tool: ToolConfiguration) {
             guard tool != appliedTool, let container else { return }
             appliedTool = tool
-            container.canvasView.tool = tool.pkTool
+            // PencilKit's own lasso is never installed: its selection is private, and its internal
+            // selection gestures compete with this app's lasso for the pencil. In lasso mode the
+            // canvas keeps its previous ink tool with drawing switched off.
+            if tool.kind != .lasso {
+                container.canvasView.tool = tool.pkTool
+            }
             container.reticleView.configure(for: tool)
             // The lasso is this app's own selection layer; it takes the pencil while active.
             container.selection.setEnabled(tool.kind == .lasso)

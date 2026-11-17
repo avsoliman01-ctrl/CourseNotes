@@ -263,6 +263,16 @@ final class LassoSelectionController: NSObject, UIGestureRecognizerDelegate {
         gestureRecognizer === panRecognizer && otherGestureRecognizer === canvasView?.panGestureRecognizer
     }
 
+    /// PencilKit attaches gesture recognizers of its own to the canvas. None of them may claim the
+    /// pencil and silently cancel the lasso, so the lasso runs alongside all of them except the
+    /// page's scroll and zoom, which the same touch must never drive.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let canvasView else { return true }
+        return otherGestureRecognizer !== canvasView.panGestureRecognizer
+            && otherGestureRecognizer !== canvasView.pinchGestureRecognizer
+    }
+
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
         guard let hostView else { return }
         let location = contentPoint(recognizer.location(in: hostView))
