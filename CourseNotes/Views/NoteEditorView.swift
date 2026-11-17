@@ -224,6 +224,11 @@ struct NoteEditorView: View {
                 } label: {
                     Label("Fit Page Width", systemImage: "arrow.left.and.right.square")
                 }
+                Button {
+                    PaletteLayout.reset()
+                } label: {
+                    Label("Reset Toolbar Position", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                }
                 Divider()
                 Button {
                     Task { await viewModel.exportPDF(currentDrawing: canvasController.currentDrawing) }

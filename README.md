@@ -251,7 +251,8 @@ produces an **unsigned** `.ipa`, which AltStore or SideStore re-sign with your o
 | Rename, tag or move a note | Long-press its card, or tap the title in the editor |
 | New note while writing | Tap **+** in the editor's toolbar. The sheet starts on the current course and module, the open note is saved, and the new note opens. |
 | Scroll ahead | Every note has at least two pages. Scroll down before writing; another page is added whenever you get near the end. Dashed lines mark where PDF pages break. |
-| Move the palette | Drag it by the grip (≡) at its leading end. Against the left or right edge it turns vertical. |
+| Move the palette | Drag it by the grip (≡) at its leading end. Drop it against the left or right edge to dock it there vertically (in windows tall enough for that layout). |
+| Recenter the palette | Double-tap the grip, or choose **More (…) › Reset Toolbar Position** in the editor. This puts it back at the top center and shows it if it was hidden. |
 | Pin or hide the palette | **Pin** locks it in place. The **chevron** collapses it to a small pencil button; tap that to bring it back. Position, pin and hidden state are remembered. |
 | Select ink | Choose the lasso, then circle strokes with the pencil, or tap a single stroke. Tap empty paper or **Done** to deselect. |
 | Move or resize a selection | Drag inside the box to move. Drag a corner handle to resize proportionally, or an edge handle to stretch one direction. |
