@@ -7,6 +7,7 @@ struct RadialPaletteView: View {
     let anchor: CGPoint?
 
     @Environment(ApplePencilManager.self) private var pencil
+    @Environment(\.paperAppearance) private var paperAppearance
 
     private let diameter: CGFloat = 316
     private let innerRadius: CGFloat = 70
@@ -39,7 +40,7 @@ struct RadialPaletteView: View {
         let tools = DrawingToolKind.allCases
         let inkTool = pencil.displayedInkTool
         let currentColor = pencil.settings(for: inkTool).color
-        let colors = InkPalette.colors(for: inkTool)
+        let colors = pencil.swatches(for: inkTool)
         let widths = inkTool.widthPresets
         let outerCount = colors.count + widths.count
 
@@ -55,7 +56,7 @@ struct RadialPaletteView: View {
                 toolButton(tool)
                     .offset(offset(index, of: tools.count, radius: innerRadius))
             }
-            ForEach(Array(colors.enumerated()), id: \.element) { index, color in
+            ForEach(Array(colors.enumerated()), id: \.offset) { index, color in
                 colorButton(color, isSelected: pencil.activeTool.isInking && color.isClose(to: currentColor))
                     .offset(offset(index, of: outerCount, radius: outerRadius))
             }
@@ -109,7 +110,7 @@ struct RadialPaletteView: View {
             pencil.dismissRadialPalette()
         } label: {
             Circle()
-                .fill(color.color)
+                .fill(color.displayedColor(on: paperAppearance))
                 .frame(width: 34, height: 34)
                 .overlay(Circle().strokeBorder(.white, lineWidth: 2))
                 .shadow(color: .black.opacity(0.2), radius: 2)
@@ -144,12 +145,14 @@ struct RadialPaletteView: View {
 struct PencilToastView: View {
     let toast: PencilToast
 
+    @Environment(\.paperAppearance) private var paperAppearance
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: toast.symbolName)
             if let color = toast.color {
                 Circle()
-                    .fill(color.color)
+                    .fill(color.displayedColor(on: paperAppearance))
                     .frame(width: 12, height: 12)
                     .overlay(Circle().strokeBorder(Color.primary.opacity(0.2)))
             }

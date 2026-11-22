@@ -24,6 +24,9 @@ hover, barrel roll and Pencil haptics.
 - **Floating palette**: drag it anywhere, pin it, or collapse it to a small button.
 - **Shape correction**: draw a rough shape and hold the pencil still to snap it to a clean one.
 - **Handwriting smoothing** (optional): evens out tremor and jagged curves without rewriting anything.
+- **Dark paper**: black pages with ink adapted to them. PDFs can still be exported on white paper.
+- **Fill and line styles**: fill closed shapes with a color; make lines solid, dashed or dotted.
+- **Your own toolbar colors**: add, replace, reorder or remove the quick-pick colors.
 - **Storage**: `PKDrawing` binary data plus JSON metadata on disk. The library is visible in the
   Files app, and you can export a one-tap backup zip. Notes export as multi-page PDFs.
 
@@ -55,7 +58,8 @@ note_app/
     │   ├── LassoSelection.swift        Custom lasso: select, move, resize, recolor (with undo)
     │   ├── InkAssistant.swift          Hold detection, shape preview, smoothing scheduling
     │   ├── ShapeRecognizer.swift       Geometric classifier: line, ellipse, polygon, polyline
-    │   └── StrokeProcessing.swift      Stroke smoothing and shape-to-ink conversion
+    │   ├── StrokeProcessing.swift      Stroke smoothing and shape-to-ink conversion
+    │   └── StrokeStyling.swift         Dashed/dotted lines and shape fills (stroke masks)
     ├── Views/
     │   ├── SidebarView.swift           NavigationSplitView root + sidebar
     │   ├── DashboardView.swift         Course grid, module chips, searchable notes grid/list
@@ -260,6 +264,12 @@ produces an **unsigned** `.ipa`, which AltStore or SideStore re-sign with your o
 | Read handwriting as text | Select ink, then tap **Recognize Text** in that bar. Review and correct the result, then copy it. |
 | Correct a shape | Draw a rough line, circle, ellipse, rectangle, triangle or simple polygon, then hold the pencil still for half a second. A clean preview appears; keep holding and move to adjust it, then lift. |
 | Smooth handwriting | Settings › Drawing Assistance › Handwriting Smoothing (Off, Subtle, Medium, Strong) |
+| Dark paper | **Settings › Appearance › Paper Color**, or **More (…) › Paper Color** in the editor: Match System, Light or Dark. Black ink shows as white on dark paper; colors keep their hue. |
+| Export light or dark | **More (…) › Export PDF**, then **Light (White Paper)** or **Dark (Black Paper)**, whatever the screen shows. |
+| Change toolbar colors | Long-press a color on the toolbar to **Replace with Current Color**, move it, or remove it. To add one, pick it with the color wheel, then tap **+**. **Settings › Appearance › Reset Toolbar Colors** restores the originals. The squeeze palette uses the same colors. |
+| Dashed or dotted lines | Tap the stroke-width dot on the toolbar and choose **Line Style**. New strokes and corrected shapes take the style when you pause. |
+| Restyle existing ink | Select it with the lasso, then use the dashed-square button in the selection bar: Solid, Dashed or Dotted. |
+| Fill a shape | Select a closed shape with the lasso (or tap its outline), switch the selection bar to **Fill**, and tap a color. The drop button offers **Solid** or **Light** fill and **Remove Fill**. Fills sit beneath all ink, so writing on top stays visible. |
 
 ### Notes on the drawing-assistance features
 
@@ -276,6 +286,26 @@ produces an **unsigned** `.ipa`, which AltStore or SideStore re-sign with your o
   to put in its place. Vision is not reliable for mathematical notation.
 - **Apple's own Smart Script** (handwriting refinement in the Notes app) has no public API and
   cannot be enabled in third-party apps.
+
+### Notes on dark paper, fills and line styles
+
+- **Battery.** iPad Air (M2) has an LCD, whose backlight stays on behind black pixels, so dark
+  paper is easier on the eyes but saves little battery. OLED iPads (iPad Pro M4 and later) do save
+  power with black.
+- **Notes aren't changed by dark paper.** Ink is stored as its light-paper color and PencilKit
+  adapts it on screen. Dashboard thumbnails on dark paper are an inverted version of the light
+  thumbnail, so their colors are close to, but not exactly, what the canvas shows.
+- **PencilKit has no fill or dash features**, so both are built from its per-stroke clipping mask,
+  the same mechanism its pixel eraser uses. A fill is a hidden sweep stroke clipped to the shape;
+  a dashed or dotted line is the original stroke with a mask that lets only the dashes or dots
+  through. Both save, reopen, move, resize, erase, undo and export like ordinary ink.
+- **What counts as a closed shape.** One stroke whose ends meet or nearly meet, including any shape
+  made by hold-to-correct. A shape drawn from several separate strokes, such as a rectangle made of
+  four lines, can't be filled.
+- **Line styles appear at the next pause**, about half a second after you lift the pencil. The first
+  Undo restores the solid stroke.
+- **Solid can't restore a dashed line that was also pixel-erased**, because the two masks are merged.
+  Use Undo instead.
 
 ## Data and backups
 

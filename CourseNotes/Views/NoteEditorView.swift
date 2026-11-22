@@ -44,7 +44,7 @@ final class NoteEditorViewModel {
         data.saveDrawing(drawing, for: noteID)
     }
 
-    func exportPDF(currentDrawing: PKDrawing?) async {
+    func exportPDF(currentDrawing: PKDrawing?, appearance: PaperAppearance) async {
         guard !isExporting, let note = data.note(id: noteID) else { return }
         isExporting = true
         defer { isExporting = false }
@@ -54,7 +54,7 @@ final class NoteEditorViewModel {
         let title = note.displayTitle
         do {
             let url = try await Task.detached(priority: .userInitiated) {
-                try NoteRenderer.pdf(for: drawing, template: template, title: title)
+                try NoteRenderer.pdf(for: drawing, template: template, title: title, appearance: appearance)
             }.value
             shareItem = ShareItem(url: url)
         } catch {
@@ -69,6 +69,8 @@ struct NoteEditorView: View {
     @Environment(CourseDataManager.self) private var data
     @Environment(ApplePencilManager.self) private var pencil
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(AppStorageKey.paperAppearance) private var paperSetting: PaperAppearanceSetting = .system
     @State private var viewModel: NoteEditorViewModel
     @State private var canvasController = CanvasController()
     @State private var showingDetails = false
@@ -128,6 +130,8 @@ struct NoteEditorView: View {
         }
         .animation(.snappy(duration: 0.25), value: pencil.toast)
         .animation(.snappy(duration: 0.25), value: canvasController.selectionCount > 0)
+        // Palettes and toasts show ink colors as they draw on this paper.
+        .environment(\.paperAppearance, paperAppearance)
         .navigationTitle(titleBinding(for: note))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarRole(.editor)
@@ -158,6 +162,8 @@ struct NoteEditorView: View {
                 showsHoverReticle: pencil.preferences.showsHoverReticle,
                 shapeHoldEnabled: pencil.preferences.shapeHoldEnabled,
                 smoothing: pencil.preferences.smoothing,
+                lineStyle: pencil.lineStyle,
+                paperAppearance: paperAppearance,
                 controller: canvasController,
                 pencil: pencil,
                 onDrawingChange: viewModel.drawingChanged
@@ -230,16 +236,35 @@ struct NoteEditorView: View {
                     Label("Reset Toolbar Position", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
                 }
                 Divider()
-                Button {
-                    Task { await viewModel.exportPDF(currentDrawing: canvasController.currentDrawing) }
+                Picker("Paper Color", selection: $paperSetting) {
+                    ForEach(PaperAppearanceSetting.allCases) { setting in
+                        Text(setting.title).tag(setting)
+                    }
+                }
+                Menu {
+                    // Export can differ from the screen: e.g. write on black, hand in white.
+                    Button {
+                        Task { await viewModel.exportPDF(currentDrawing: canvasController.currentDrawing, appearance: .light) }
+                    } label: {
+                        Label("Light (White Paper)", systemImage: "sun.max")
+                    }
+                    Button {
+                        Task { await viewModel.exportPDF(currentDrawing: canvasController.currentDrawing, appearance: .dark) }
+                    } label: {
+                        Label("Dark (Black Paper)", systemImage: "moon")
+                    }
                 } label: {
-                    Label("Export PDF…", systemImage: "square.and.arrow.up")
+                    Label("Export PDF", systemImage: "square.and.arrow.up")
                 }
                 .disabled(viewModel.isExporting)
             } label: {
                 Label("More", systemImage: "ellipsis.circle")
             }
         }
+    }
+
+    private var paperAppearance: PaperAppearance {
+        paperSetting.resolved(for: colorScheme)
     }
 
     private func titleBinding(for note: NoteDocument) -> Binding<String> {

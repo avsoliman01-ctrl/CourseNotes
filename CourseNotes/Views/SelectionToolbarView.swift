@@ -1,40 +1,119 @@
 import SwiftUI
 import Vision
 
-/// Contextual bar shown while the lasso has a selection: recolor, duplicate, recognize text, delete.
-/// Moving and resizing happen directly on the canvas (drag inside the box, or drag its handles).
+/// Contextual bar shown while the lasso has a selection: recolor or fill, line style, duplicate,
+/// recognize text, delete. Moving and resizing happen directly on the canvas (drag inside the box,
+/// or drag its handles).
 struct SelectionToolbarView: View {
     let controller: CanvasController
 
+    /// What a color tap changes: the strokes themselves, or the inside of closed shapes.
+    private enum ColorTarget: Hashable {
+        case ink, fill
+    }
+
+    @Environment(ApplePencilManager.self) private var pencil
+    @Environment(\.paperAppearance) private var paperAppearance
+    @State private var target: ColorTarget = .ink
+    @State private var fillStyle: FillStyle = .solid
     @State private var customColor = Color.blue
+    /// Fills are rebuilt per change, so colors from the system picker are applied once it settles.
+    @State private var pendingFillColor: RGBAColor?
+    @State private var notice: String?
     @State private var recognition: RecognitionRequest?
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(pluralize(controller.selectionCount, "stroke"))
+        ViewThatFits(in: .horizontal) {
+            bar(swatchLimit: nil)
+            bar(swatchLimit: 3)
+        }
+        .sheet(item: $recognition) { request in
+            TextRecognitionSheet(image: request.image)
+        }
+        .task(id: notice) {
+            guard notice != nil else { return }
+            try? await Task.sleep(for: .seconds(2))
+            notice = nil
+        }
+        .task(id: pendingFillColor) {
+            guard let color = pendingFillColor else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            pendingFillColor = nil
+            apply(color)
+        }
+    }
+
+    private func bar(swatchLimit: Int?) -> some View {
+        let swatches = pencil.penSwatches
+        let shown = swatchLimit.map { Array(swatches.prefix($0)) } ?? swatches
+
+        return HStack(spacing: 6) {
+            Text(notice ?? pluralize(controller.selectionCount, "stroke"))
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(notice == nil ? Color.primary : Color.orange)
                 .monospacedDigit()
                 .padding(.horizontal, 6)
 
             Divider().frame(height: 24)
 
-            ForEach(InkPalette.pen, id: \.self) { color in
+            Picker("Color Changes", selection: $target) {
+                Text("Ink").tag(ColorTarget.ink)
+                Text("Fill").tag(ColorTarget.fill)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 104)
+            .help("Ink recolors the strokes; Fill paints the inside of closed shapes")
+
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, color in
                 Button {
-                    controller.recolorSelection(color)
+                    apply(color)
                 } label: {
                     Circle()
-                        .fill(color.color)
+                        .fill(color.displayedColor(on: paperAppearance))
                         .frame(width: 24, height: 24)
                         .overlay(Circle().strokeBorder(Color.primary.opacity(0.15)))
                         .frame(width: 32, height: 38)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Recolor selection")
+                .accessibilityLabel(target == .fill ? "Fill selection" : "Recolor selection")
             }
             ColorPicker("Custom Color", selection: customColorBinding, supportsOpacity: false)
                 .labelsHidden()
                 .frame(width: 34, height: 38)
+
+            if target == .fill {
+                Menu {
+                    Picker("Fill Style", selection: $fillStyle) {
+                        ForEach(FillStyle.allCases) { style in
+                            Text(style.title).tag(style)
+                        }
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        if !controller.removeFillFromSelection() { notice = "No fill to remove" }
+                    } label: {
+                        Label("Remove Fill", systemImage: "drop.triangle")
+                    }
+                } label: {
+                    barIcon("drop.fill")
+                }
+                .help("Fill style")
+                .accessibilityLabel("Fill options")
+            }
+
+            Menu {
+                ForEach(StrokeLineStyle.allCases) { style in
+                    Button(style.title) {
+                        if !controller.setSelectionLineStyle(style) { notice = "Already \(style.title.lowercased())" }
+                    }
+                }
+            } label: {
+                barIcon("square.dashed")
+            }
+            .help("Line style: solid, dashed or dotted")
+            .accessibilityLabel("Line style")
 
             Divider().frame(height: 24)
 
@@ -64,21 +143,42 @@ struct SelectionToolbarView: View {
         .overlay(Capsule().strokeBorder(.quaternary))
         .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
         .fixedSize()
-        .sheet(item: $recognition) { request in
-            TextRecognitionSheet(image: request.image)
+    }
+
+    private func apply(_ color: RGBAColor) {
+        switch target {
+        case .ink:
+            controller.recolorSelection(color)
+        case .fill:
+            if !controller.fillSelection(color, style: fillStyle) {
+                notice = "No closed shape"
+            }
         }
     }
 
-    /// Every value the system color picker reports is applied live; the selection controller folds
-    /// a continuous drag into a single undo step.
+    /// Ink changes apply live (the selection controller folds a continuous drag into one undo step).
+    /// Fills apply once the picker settles. Colors picked on dark paper are stored so they draw
+    /// as they were seen.
     private var customColorBinding: Binding<Color> {
         Binding(
             get: { customColor },
             set: { newColor in
                 customColor = newColor
-                controller.recolorSelection(RGBAColor(UIColor(newColor)))
+                let stored = RGBAColor.stored(fromDisplayed: UIColor(newColor), on: paperAppearance)
+                if target == .fill {
+                    pendingFillColor = stored
+                } else {
+                    controller.recolorSelection(stored)
+                }
             }
         )
+    }
+
+    private func barIcon(_ systemImage: String) -> some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 16, weight: .medium))
+            .frame(width: 38, height: 38)
+            .contentShape(Rectangle())
     }
 
     private func barButton(_ title: String, systemImage: String, role: ButtonRole? = nil,

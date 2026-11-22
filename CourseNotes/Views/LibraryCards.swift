@@ -126,18 +126,33 @@ struct NoteThumbnailView: View {
     let note: NoteDocument
 
     @Environment(CourseDataManager.self) private var data
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(AppStorageKey.paperAppearance) private var paperSetting: PaperAppearanceSetting = .system
     @State private var image: UIImage?
 
     var body: some View {
+        // Thumbnails are cached on white paper. For dark paper they are inverted with the hue
+        // turned back around, which flips lightness but keeps blue ink blue, close to how
+        // PencilKit adapts ink on the canvas.
+        let isDark = paperSetting.resolved(for: colorScheme) == .dark
         Rectangle()
-            .fill(Color.white)
+            .fill(isDark ? Color.black : Color.white)
             .aspectRatio(CanvasMetrics.thumbnailAspectRatio, contentMode: .fit)
             .overlay {
                 if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .transition(.opacity)
+                    if isDark {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .colorInvert()
+                            .hueRotation(.degrees(180))
+                            .transition(.opacity)
+                    } else {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .transition(.opacity)
+                    }
                 }
             }
             .clipped()

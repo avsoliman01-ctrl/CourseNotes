@@ -33,13 +33,20 @@ final class CanvasContainerView: UIView {
         }
     }
 
+    /// White or black paper. The canvas's appearance follows, so PencilKit shows the stored
+    /// light-mode ink adapted for the paper (black ink draws and displays as white on black).
+    var paperAppearance: PaperAppearance = .light {
+        didSet {
+            guard paperAppearance != oldValue else { return }
+            applyPaperAppearance()
+        }
+    }
+
     private var lastLayoutWidth: CGFloat = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        // Paper stays white in Dark Mode; this also stops PencilKit from inverting ink colors.
-        overrideUserInterfaceStyle = .light
-        backgroundColor = PaperStyle.paper
+        applyPaperAppearance()
 
         paperView.isUserInteractionEnabled = false
         reticleView.isUserInteractionEnabled = false
@@ -61,6 +68,13 @@ final class CanvasContainerView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// The paper's appearance is fixed by the setting, never by whatever the app's UI happens to be.
+    private func applyPaperAppearance() {
+        overrideUserInterfaceStyle = paperAppearance.interfaceStyle
+        backgroundColor = paperAppearance.colors.paper
+        paperView.colors = paperAppearance.colors
     }
 
     override func layoutSubviews() {
@@ -151,13 +165,20 @@ final class PaperBackgroundView: UIView {
         didSet { setNeedsDisplay() }
     }
 
+    var colors: PaperColors = .light {
+        didSet {
+            backgroundColor = colors.paper
+            setNeedsDisplay()
+        }
+    }
+
     private var contentOffset: CGPoint = .zero
     private var zoomScale: CGFloat = 1
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isOpaque = true
-        backgroundColor = PaperStyle.paper
+        backgroundColor = colors.paper
         contentMode = .redraw
     }
 
@@ -175,7 +196,7 @@ final class PaperBackgroundView: UIView {
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        PaperStyle.paper.setFill()
+        colors.paper.setFill()
         context.fill(rect)
         guard zoomScale > 0 else { return }
 
@@ -186,7 +207,7 @@ final class PaperBackgroundView: UIView {
                                     y: (contentOffset.y + rect.minY) / zoomScale,
                                     width: rect.width / zoomScale,
                                     height: rect.height / zoomScale)
-        template.draw(in: context, contentRect: visibleContent, zoomScale: zoomScale)
+        template.draw(in: context, contentRect: visibleContent, zoomScale: zoomScale, colors: colors)
         drawPageBreaks(in: context, visibleContent: visibleContent)
     }
 
@@ -200,7 +221,7 @@ final class PaperBackgroundView: UIView {
 
         let unit = 1 / zoomScale
         context.saveGState()
-        context.setStrokeColor(UIColor(white: 0.45, alpha: 0.45).cgColor)
+        context.setStrokeColor(colors.pageBreak.cgColor)
         context.setLineWidth(unit)
         context.setLineDash(phase: 0, lengths: [8 * unit, 6 * unit])
         for page in first...last {
@@ -267,7 +288,8 @@ final class HoverReticleView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(for tool: ToolConfiguration) {
+    /// `appearance` is the paper's: on dark paper the reticle shows the ink as PencilKit will draw it.
+    func configure(for tool: ToolConfiguration, appearance: PaperAppearance) {
         switch tool.kind {
         case .eraser:
             style = .eraser
@@ -276,7 +298,7 @@ final class HoverReticleView: UIView {
             style = .lasso
             toolWidth = 8
         default:
-            style = .ink(tool.color.uiColor)
+            style = .ink(tool.color.displayedUIColor(on: appearance))
             toolWidth = tool.width
         }
 

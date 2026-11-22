@@ -69,6 +69,8 @@ final class InkAssistant: NSObject, UIGestureRecognizerDelegate {
 
     var isShapeHoldEnabled = true
     var smoothing: SmoothingStrength = .off
+    /// Dashed or dotted style for new ink and corrected shapes.
+    var lineStyle: StrokeLineStyle = .solid
     var allowsFingerInput = false
     /// Only inking tools get assistance; the eraser and lasso never do.
     var isInkingToolActive = true
@@ -144,7 +146,7 @@ final class InkAssistant: NSObject, UIGestureRecognizerDelegate {
             }
             return
         }
-        guard smoothing != .off else { return }
+        guard processesNewStrokes else { return }
         unsmoothedIndices.append(index)
         scheduleSmoothing()
     }
@@ -161,7 +163,7 @@ final class InkAssistant: NSObject, UIGestureRecognizerDelegate {
     // MARK: Hold detection
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard isInkingToolActive, isShapeHoldEnabled || smoothing != .off else { return false }
+        guard isInkingToolActive, isShapeHoldEnabled || processesNewStrokes else { return false }
         return touch.type == .pencil || (allowsFingerInput && touch.type == .direct)
     }
 
@@ -299,8 +301,14 @@ final class InkAssistant: NSObject, UIGestureRecognizerDelegate {
         let drawing = canvasView.drawing
         var strokes = drawing.strokes
         guard index < strokes.count else { return }
-        strokes[index] = ShapeStrokeBuilder.stroke(for: shape, replacing: strokes[index])
+        let clean = ShapeStrokeBuilder.stroke(for: shape, replacing: strokes[index])
+        strokes[index] = StrokeStyling.styled(clean, as: lineStyle) ?? clean
         commit(PKDrawing(strokes: strokes), from: drawing, actionName: "Shape Correction")
+    }
+
+    /// Whether new strokes need work at the next pause (smoothing and/or a dashed or dotted style).
+    private var processesNewStrokes: Bool {
+        smoothing != .off || lineStyle != .solid
     }
 
     private func scheduleSmoothing() {
@@ -318,19 +326,26 @@ final class InkAssistant: NSObject, UIGestureRecognizerDelegate {
         guard let canvasView, !isTouchDown else { return }
         let indices = unsmoothedIndices
         unsmoothedIndices = []
-        guard smoothing != .off, !indices.isEmpty else { return }
+        guard processesNewStrokes, !indices.isEmpty else { return }
 
         let drawing = canvasView.drawing
         var strokes = drawing.strokes
-        var changed = false
+        var smoothedAny = false
+        var styledAny = false
         for index in indices where index < strokes.count {
             if let smoothed = StrokeSmoother.smoothed(strokes[index], strength: smoothing) {
                 strokes[index] = smoothed
-                changed = true
+                smoothedAny = true
+            }
+            // After smoothing, so dashes follow the final path.
+            if let styled = StrokeStyling.styled(strokes[index], as: lineStyle) {
+                strokes[index] = styled
+                styledAny = true
             }
         }
-        if changed {
-            commit(PKDrawing(strokes: strokes), from: drawing, actionName: "Smooth Handwriting")
+        if smoothedAny || styledAny {
+            commit(PKDrawing(strokes: strokes), from: drawing,
+                   actionName: styledAny ? "Line Style" : "Smooth Handwriting")
         }
     }
 

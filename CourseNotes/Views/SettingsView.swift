@@ -1,7 +1,31 @@
 import SwiftUI
 import UIKit
 
+/// Paper color choice. "Match System" follows the iPad's Light/Dark setting.
+enum PaperAppearanceSetting: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: "Match System"
+        case .light: "Light (White Paper)"
+        case .dark: "Dark (Black Paper)"
+        }
+    }
+
+    func resolved(for colorScheme: ColorScheme) -> PaperAppearance {
+        switch self {
+        case .system: colorScheme == .dark ? .dark : .light
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
 enum AppStorageKey {
+    static let paperAppearance = "notes.paperAppearance"
     static let defaultTemplate = "notes.defaultTemplate"
     static let dashboardLayout = "dashboard.layout"
     static let dashboardSortOrder = "dashboard.sortOrder"
@@ -12,6 +36,7 @@ struct SettingsView: View {
     @Environment(CourseDataManager.self) private var data
     @Environment(\.dismiss) private var dismiss
     @AppStorage(AppStorageKey.defaultTemplate) private var defaultTemplate: PaperTemplate = .collegeRuled
+    @AppStorage(AppStorageKey.paperAppearance) private var paperSetting: PaperAppearanceSetting = .system
     @State private var shareItem: ShareItem?
     @State private var backupError: String?
 
@@ -64,6 +89,21 @@ struct SettingsView: View {
                     Text("Drawing Assistance")
                 } footer: {
                     Text("Shapes: draw a rough line, circle, rectangle or triangle and keep the pencil still for half a second. Smoothing evens out tremor and jagged curves when you pause; it never rewrites or recognizes your handwriting. Undo restores a stroke exactly as you drew it.")
+                }
+
+                Section {
+                    Picker("Paper Color", selection: $paperSetting) {
+                        ForEach(PaperAppearanceSetting.allCases) { setting in
+                            Text(setting.title).tag(setting)
+                        }
+                    }
+                    Button("Reset Toolbar Colors") {
+                        pencil.resetSwatches()
+                    }
+                } header: {
+                    Text("Appearance")
+                } footer: {
+                    Text("Dark paper shows every note on black with ink adapted to it: black ink appears white and colors keep their hue. Your notes aren't changed, and PDFs can still be exported on white paper from the editor's More menu. On iPad Air's LCD screen dark paper is easier on the eyes but saves little battery.")
                 }
 
                 Section("New Notes") {

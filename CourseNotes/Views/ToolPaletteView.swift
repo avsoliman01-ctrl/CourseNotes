@@ -25,6 +25,7 @@ private struct PaletteBar: View {
     let axis: Axis
 
     @Environment(ApplePencilManager.self) private var pencil
+    @Environment(\.paperAppearance) private var paperAppearance
     @State private var showingWidth = false
     @State private var showingEraserOptions = false
 
@@ -60,7 +61,7 @@ private struct PaletteBar: View {
             pencil.select(tool)
         } label: {
             ToolIcon(symbol: tool.symbolName, isActive: isActive,
-                     inkColor: tool.isInking ? pencil.settings(for: tool).color.color : nil)
+                     inkColor: tool.isInking ? pencil.settings(for: tool).color.displayedColor(on: paperAppearance) : nil)
         }
         .buttonStyle(.plain)
         .help(tool.displayName)
@@ -117,31 +118,77 @@ private struct PaletteBar: View {
 
     // MARK: Colors
 
+    /// The user's colors. Long-press one to replace it with the current ink, reorder or remove it;
+    /// + adds the current ink (pick it first with the color wheel).
     @ViewBuilder
     private var colorControls: some View {
         let tool = pencil.displayedInkTool
         let current = pencil.settings(for: tool).color
-        let palette = InkPalette.colors(for: tool)
+        let palette = pencil.swatches(for: tool)
         let swatches = isCompact ? Array(palette.prefix(3)) : palette
 
-        ForEach(swatches, id: \.self) { color in
+        ForEach(Array(swatches.enumerated()), id: \.offset) { index, color in
             Button {
                 pencil.setColor(color)
             } label: {
                 ColorDot(color: color, isSelected: pencil.activeTool.isInking && color.isClose(to: current))
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button {
+                    pencil.replaceSwatch(at: index, with: current, for: tool)
+                } label: {
+                    Label("Replace with Current Color", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(color.isClose(to: current))
+                Button {
+                    pencil.moveSwatch(at: index, by: -1, for: tool)
+                } label: {
+                    Label("Move Left", systemImage: "arrow.left")
+                }
+                .disabled(index == 0)
+                Button {
+                    pencil.moveSwatch(at: index, by: 1, for: tool)
+                } label: {
+                    Label("Move Right", systemImage: "arrow.right")
+                }
+                .disabled(index == palette.count - 1)
+                Divider()
+                Button(role: .destructive) {
+                    pencil.removeSwatch(at: index, for: tool)
+                } label: {
+                    Label("Remove Color", systemImage: "trash")
+                }
+                .disabled(palette.count <= 1)
+            }
         }
         ColorPicker("Custom Color", selection: customColorBinding, supportsOpacity: false)
             .labelsHidden()
             .frame(width: 34, height: 38)
+        if !isCompact {
+            Button {
+                pencil.addSwatch(current, for: tool)
+            } label: {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 38)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!pencil.canAddSwatch(current, for: tool))
+            .opacity(pencil.canAddSwatch(current, for: tool) ? 1 : 0.35)
+            .help("Add the current color to the toolbar")
+            .accessibilityLabel("Add current color to toolbar")
+        }
     }
 
     /// The system color picker edits the color of the ink tool (switching back to it if erasing).
+    /// On dark paper it shows and takes colors as they appear there.
     private var customColorBinding: Binding<Color> {
         Binding(
-            get: { pencil.settings(for: pencil.displayedInkTool).color.color },
-            set: { pencil.setColor(RGBAColor(UIColor($0))) }
+            get: { pencil.settings(for: pencil.displayedInkTool).color.displayedColor(on: paperAppearance) },
+            set: { pencil.setColor(RGBAColor.stored(fromDisplayed: UIColor($0), on: paperAppearance)) }
         )
     }
 
@@ -164,7 +211,7 @@ private struct PaletteBar: View {
             showingWidth = true
         } label: {
             Circle()
-                .fill(tool == .eraser ? Color.secondary : settings.color.color)
+                .fill(tool == .eraser ? Color.secondary : settings.color.displayedColor(on: paperAppearance))
                 .overlay(Circle().strokeBorder(Color.primary.opacity(0.15)))
                 .frame(width: size, height: size)
                 .frame(width: 38, height: 38)
@@ -254,9 +301,11 @@ private struct ColorDot: View {
     let color: RGBAColor
     let isSelected: Bool
 
+    @Environment(\.paperAppearance) private var paperAppearance
+
     var body: some View {
         Circle()
-            .fill(color.color)
+            .fill(color.displayedColor(on: paperAppearance))
             .frame(width: 24, height: 24)
             .overlay(Circle().strokeBorder(Color.primary.opacity(0.15)))
             .padding(3)
@@ -303,9 +352,24 @@ private struct WidthOptionsView: View {
             Text(String(format: "%.1f pt", Double(width)))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
+
+            Divider()
+
+            Text("Line Style")
+                .font(.headline)
+            Picker("Line Style", selection: Binding(get: { pencil.lineStyle }, set: { pencil.setLineStyle($0) })) {
+                ForEach(StrokeLineStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text("Dashed and dotted apply to new strokes and corrected shapes when you pause. To change existing ink, select it with the lasso.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
-        .frame(width: 280)
+        .frame(width: 300)
     }
 }
 

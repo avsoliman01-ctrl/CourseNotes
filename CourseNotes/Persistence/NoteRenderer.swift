@@ -8,11 +8,8 @@ import UIKit
 enum NoteRenderer {
     static let thumbnailSize = CGSize(width: 360, height: 360 / CanvasMetrics.thumbnailAspectRatio)
 
-    /// Ink always renders in light appearance: notes sit on white paper even in Dark Mode,
-    /// and PencilKit would otherwise adapt black ink to white.
-    private static let lightTraits = UITraitCollection(userInterfaceStyle: .light)
-
     /// Paper + ink for the top of the page, matching what the canvas shows when first opened.
+    /// Thumbnails are always light; the dashboard inverts them for display on dark paper.
     static func thumbnail(for drawing: PKDrawing, template: PaperTemplate, size: CGSize = thumbnailSize) -> UIImage {
         let scale = size.width / CanvasMetrics.pageWidth
         let contentRect = CGRect(x: 0, y: 0, width: CanvasMetrics.pageWidth, height: size.height / scale)
@@ -23,7 +20,7 @@ enum NoteRenderer {
         let ink = inkImage(drawing, in: contentRect, scale: scale * format.scale)
         return UIGraphicsImageRenderer(size: size, format: format).image { context in
             let cg = context.cgContext
-            PaperStyle.paper.setFill()
+            PaperColors.light.paper.setFill()
             cg.fill(CGRect(origin: .zero, size: size))
 
             cg.saveGState()
@@ -35,8 +32,10 @@ enum NoteRenderer {
         }
     }
 
-    /// Writes the note as a multi-page PDF (US Letter proportions) to a temporary file.
-    static func pdf(for drawing: PKDrawing, template: PaperTemplate, title: String) throws -> URL {
+    /// Writes the note as a multi-page PDF (US Letter proportions) to a temporary file,
+    /// on white or black paper regardless of how the note is shown on screen.
+    static func pdf(for drawing: PKDrawing, template: PaperTemplate, title: String,
+                    appearance: PaperAppearance = .light) throws -> URL {
         let pageSize = CGSize(width: CanvasMetrics.pageWidth, height: CanvasMetrics.pageHeight)
         let inkBottom = drawing.bounds.isNull ? 0 : drawing.bounds.maxY
         let pageCount = max(1, Int(ceil(inkBottom / pageSize.height)))
@@ -59,15 +58,15 @@ enum NoteRenderer {
                     let cg = context.cgContext
                     let pageRect = CGRect(origin: CGPoint(x: 0, y: CGFloat(page) * pageSize.height), size: pageSize)
 
-                    PaperStyle.paper.setFill()
+                    appearance.colors.paper.setFill()
                     cg.fill(CGRect(origin: .zero, size: pageSize))
 
                     cg.saveGState()
                     cg.translateBy(x: 0, y: -pageRect.minY)
-                    template.draw(in: cg, contentRect: pageRect, zoomScale: 1)
+                    template.draw(in: cg, contentRect: pageRect, zoomScale: 1, colors: appearance.colors)
                     cg.restoreGState()
 
-                    inkImage(drawing, in: pageRect, scale: 2).draw(in: CGRect(origin: .zero, size: pageSize))
+                    inkImage(drawing, in: pageRect, scale: 2, appearance: appearance).draw(in: CGRect(origin: .zero, size: pageSize))
                 }
             }
         }
@@ -83,9 +82,12 @@ enum NoteRenderer {
         return cleaned.isEmpty ? "Untitled Note" : cleaned
     }
 
-    private static func inkImage(_ drawing: PKDrawing, in rect: CGRect, scale: CGFloat) -> UIImage {
+    /// `PKDrawing.image` adapts ink to the current trait collection, so render under the paper's
+    /// appearance: black ink stays black on white paper and becomes white on black paper.
+    private static func inkImage(_ drawing: PKDrawing, in rect: CGRect, scale: CGFloat,
+                                 appearance: PaperAppearance = .light) -> UIImage {
         var image = UIImage()
-        lightTraits.performAsCurrent {
+        appearance.traitCollection.performAsCurrent {
             image = drawing.image(from: rect, scale: scale)
         }
         return image

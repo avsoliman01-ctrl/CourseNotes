@@ -128,6 +128,22 @@ struct RGBAColor: Codable, Hashable {
     var uiColor: UIColor { UIColor(red: red, green: green, blue: blue, alpha: alpha) }
     var color: Color { Color(uiColor: uiColor) }
 
+    /// Ink is stored as its light-paper color. On dark paper PencilKit displays it adapted
+    /// (black becomes white, colors keep their hue), and swatches should match what draws.
+    func displayedUIColor(on appearance: PaperAppearance) -> UIColor {
+        appearance == .dark ? PKInkingTool.convertColor(uiColor, from: .light, to: .dark) : uiColor
+    }
+
+    func displayedColor(on appearance: PaperAppearance) -> Color {
+        Color(uiColor: displayedUIColor(on: appearance))
+    }
+
+    /// The stored ink for a color the user picked while looking at `appearance` paper, so a color
+    /// chosen on dark paper draws as that color rather than its inverse.
+    static func stored(fromDisplayed color: UIColor, on appearance: PaperAppearance) -> RGBAColor {
+        RGBAColor(appearance == .dark ? PKInkingTool.convertColor(color, from: .dark, to: .light) : color)
+    }
+
     /// Colors from the system picker carry floating-point noise; compare with a tolerance.
     func isClose(to other: RGBAColor) -> Bool {
         abs(red - other.red) < 0.01 && abs(green - other.green) < 0.01
@@ -146,6 +162,18 @@ struct RGBAColor: Codable, Hashable {
     static let highlightPink = RGBAColor(red: 1.00, green: 0.55, blue: 0.75)
     static let highlightBlue = RGBAColor(red: 0.45, green: 0.78, blue: 1.00)
     static let highlightOrange = RGBAColor(red: 1.00, green: 0.70, blue: 0.35)
+}
+
+private struct PaperAppearanceKey: EnvironmentKey {
+    static let defaultValue: PaperAppearance = .light
+}
+
+extension EnvironmentValues {
+    /// Appearance of the paper in the open note, so palettes can show ink as it will draw.
+    var paperAppearance: PaperAppearance {
+        get { self[PaperAppearanceKey.self] }
+        set { self[PaperAppearanceKey.self] = newValue }
+    }
 }
 
 enum InkPalette {

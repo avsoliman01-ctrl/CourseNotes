@@ -147,6 +147,15 @@ final class LassoSelectionController: NSObject, UIGestureRecognizerDelegate {
         return drawing.strokes.indices.filter { index in
             let stroke = drawing.strokes[index]
             guard stroke.renderBounds.intersects(lassoBounds) else { return false }
+            if StrokeStyling.isFill(stroke) {
+                // A fill's sweep runs outside its shape (clipped away), so test the painted area.
+                let box = StrokeStyling.fillBounds(stroke)
+                let fractions: [(CGFloat, CGFloat)] = [(0.5, 0.5), (0.3, 0.3), (0.7, 0.3), (0.3, 0.7), (0.7, 0.7)]
+                let samples = fractions.map {
+                    CGPoint(x: box.minX + box.width * $0.0, y: box.minY + box.height * $0.1)
+                }
+                return samples.filter { path.contains($0) }.count >= 3
+            }
             var inside = 0
             var total = 0
             for point in stroke.path {
@@ -157,11 +166,54 @@ final class LassoSelectionController: NSObject, UIGestureRecognizerDelegate {
         }
     }
 
-    /// Topmost stroke passing within reach of a tap.
+    /// Adds the fills of selected shapes, and the outlines of selected fills, so a filled shape
+    /// always moves, resizes, duplicates and deletes as one piece.
+    private func withAttachedFills(_ indices: [Int]) -> [Int] {
+        guard let drawing = canvasView?.drawing else { return indices }
+        let strokes = drawing.strokes
+        let fillIndices = strokes.indices.filter { StrokeStyling.isFill(strokes[$0]) }
+        guard !fillIndices.isEmpty else { return indices }
+
+        var result = Set(indices)
+        for index in indices where index < strokes.count {
+            if StrokeStyling.isFill(strokes[index]) {
+                let painted = StrokeStyling.fillBounds(strokes[index])
+                for candidate in strokes.indices where !result.contains(candidate) {
+                    let stroke = strokes[candidate]
+                    // Cheap bounds test first; only then trace the candidate's outline.
+                    guard !StrokeStyling.isFill(stroke), stroke.renderBounds.intersects(painted),
+                          abs(stroke.renderBounds.width - painted.width) < 40,
+                          abs(stroke.renderBounds.height - painted.height) < 40,
+                          let region = StrokeStyling.closedRegion(of: stroke),
+                          StrokeStyling.fill(strokes[index], matches: region) else { continue }
+                    result.insert(candidate)
+                }
+            } else if let region = StrokeStyling.closedRegion(of: strokes[index]) {
+                for fill in fillIndices where StrokeStyling.fill(strokes[fill], matches: region) {
+                    result.insert(fill)
+                }
+            }
+        }
+        return result.sorted()
+    }
+
+    /// Topmost fill whose painted area contains `location`.
+    private func fillIndex(containing location: CGPoint) -> Int? {
+        guard let drawing = canvasView?.drawing else { return nil }
+        return drawing.strokes.indices.reversed().first { index in
+            let stroke = drawing.strokes[index]
+            return StrokeStyling.isFill(stroke) && stroke.renderBounds.contains(location)
+                && StrokeStyling.fill(stroke, contains: location)
+        }
+    }
+
+    /// Topmost stroke passing within reach of a tap. Fills are found by `fillIndex(containing:)`,
+    /// since their sweep's control points lie outside the visible area.
     private func strokeIndex(near location: CGPoint, reach: CGFloat) -> Int? {
         guard let drawing = canvasView?.drawing else { return nil }
         return drawing.strokes.indices.reversed().first { index in
             let stroke = drawing.strokes[index]
+            guard !StrokeStyling.isFill(stroke) else { return false }
             guard stroke.renderBounds.insetBy(dx: -reach, dy: -reach).contains(location) else { return false }
             return stroke.path.contains { point in
                 let position = point.location.applying(stroke.transform)
@@ -172,10 +224,14 @@ final class LassoSelectionController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: Edits (each is one undo step)
 
+    /// Recolors the ink of the selection. Fills keep their color (change those with
+    /// `fillSelection`), unless only fills are selected.
     func recolorSelection(_ color: UIColor) {
         guard hasSelection, let drawing = canvasView?.drawing else { return }
         var strokes = drawing.strokes
-        for index in selectedIndices where index < strokes.count {
+        let valid = selectedIndices.filter { $0 < strokes.count }
+        let lines = valid.filter { !StrokeStyling.isFill(strokes[$0]) }
+        for index in lines.isEmpty ? valid : lines {
             strokes[index].ink = PKInk(strokes[index].ink.inkType, color: color)
         }
         // Dragging through the system color picker sends a stream of colors; fold them into one undo step.
@@ -183,6 +239,95 @@ final class LassoSelectionController: NSObject, UIGestureRecognizerDelegate {
         lastRecolorDate = Date()
         commit(PKDrawing(strokes: strokes), from: drawing, actionName: "Change Ink Color",
                registersUndo: !continuesPreviousRecolor)
+    }
+
+    /// Fills every closed shape in the selection (a stroke whose ends meet). Filling a shape that
+    /// is already filled changes its fill. With only fills selected, recolors those fills.
+    /// Returns false when there is nothing closed to fill.
+    @discardableResult
+    func fillSelection(with color: UIColor, style: FillStyle) -> Bool {
+        guard hasSelection, let drawing = canvasView?.drawing else { return false }
+        let strokes = drawing.strokes
+        let selected = selectedIndices.filter { $0 < strokes.count }
+        let regions = selected
+            .filter { !StrokeStyling.isFill(strokes[$0]) }
+            .compactMap { StrokeStyling.closedRegion(of: strokes[$0]) }
+
+        guard !regions.isEmpty else {
+            let fills = selected.filter { StrokeStyling.isFill(strokes[$0]) }
+            guard !fills.isEmpty else { return false }
+            var updated = strokes
+            for index in fills {
+                guard let mask = strokes[index].mask else { continue }
+                var transform = strokes[index].transform
+                guard let region = mask.cgPath.copy(using: &transform) else { continue }
+                updated[index] = StrokeStyling.fillStroke(for: region, color: color, style: style)
+            }
+            commit(PKDrawing(strokes: updated), from: drawing, actionName: "Fill Shape")
+            refreshOverlay()
+            return true
+        }
+
+        // Replace fills these shapes already have, so filling again changes color instead of stacking.
+        let replaced = Set(strokes.indices.filter { index in
+            StrokeStyling.isFill(strokes[index]) && regions.contains { StrokeStyling.fill(strokes[index], matches: $0) }
+        })
+        // New fills go beneath all other ink, so they never cover writing.
+        var result = regions.map { StrokeStyling.fillStroke(for: $0, color: color, style: style) }
+        let fillCount = result.count
+        var newIndex: [Int: Int] = [:]
+        for (index, stroke) in strokes.enumerated() where !replaced.contains(index) {
+            newIndex[index] = result.count
+            result.append(stroke)
+        }
+        commit(PKDrawing(strokes: result), from: drawing, actionName: "Fill Shape")
+        select(Array(0..<fillCount) + selected.compactMap { newIndex[$0] })
+        return true
+    }
+
+    /// Removes the fills of selected shapes (and any selected fills). Returns false if none.
+    @discardableResult
+    func removeFillFromSelection() -> Bool {
+        guard hasSelection, let drawing = canvasView?.drawing else { return false }
+        let strokes = drawing.strokes
+        let selected = selectedIndices.filter { $0 < strokes.count }
+        let selectedSet = Set(selected)
+        let regions = selected
+            .filter { !StrokeStyling.isFill(strokes[$0]) }
+            .compactMap { StrokeStyling.closedRegion(of: strokes[$0]) }
+        let doomed = Set(strokes.indices.filter { index in
+            StrokeStyling.isFill(strokes[index])
+                && (selectedSet.contains(index) || regions.contains { StrokeStyling.fill(strokes[index], matches: $0) })
+        })
+        guard !doomed.isEmpty else { return false }
+
+        var result: [PKStroke] = []
+        var newIndex: [Int: Int] = [:]
+        for (index, stroke) in strokes.enumerated() where !doomed.contains(index) {
+            newIndex[index] = result.count
+            result.append(stroke)
+        }
+        commit(PKDrawing(strokes: result), from: drawing, actionName: "Remove Fill")
+        select(selected.compactMap { newIndex[$0] })
+        return true
+    }
+
+    /// Makes the selected ink solid, dashed or dotted. Returns false if nothing changed.
+    @discardableResult
+    func setLineStyle(_ style: StrokeLineStyle) -> Bool {
+        guard hasSelection, let drawing = canvasView?.drawing else { return false }
+        var strokes = drawing.strokes
+        var changed = false
+        for index in selectedIndices where index < strokes.count && !StrokeStyling.isFill(strokes[index]) {
+            if let styled = StrokeStyling.styled(strokes[index], as: style) {
+                strokes[index] = styled
+                changed = true
+            }
+        }
+        guard changed else { return false }
+        commit(PKDrawing(strokes: strokes), from: drawing, actionName: "Line Style")
+        refreshOverlay()
+        return true
     }
 
     func deleteSelection() {
@@ -278,7 +423,10 @@ final class LassoSelectionController: NSObject, UIGestureRecognizerDelegate {
         let location = contentPoint(recognizer.location(in: hostView))
         if hasSelection, selectionBounds.insetBy(dx: -reach, dy: -reach).contains(location) { return }
         if let index = strokeIndex(near: location, reach: reach * 0.6) {
-            select([index])
+            select(withAttachedFills([index]))
+        } else if let fill = fillIndex(containing: location) {
+            // Tapping inside a filled shape selects the fill and its outline.
+            select(withAttachedFills([fill]))
         } else {
             clearSelection()
         }
@@ -356,7 +504,7 @@ final class LassoSelectionController: NSObject, UIGestureRecognizerDelegate {
         case .lassoing(let points):
             interaction = .idle
             overlay.lassoPoints = []
-            select(strokeIndices(inside: points))
+            select(withAttachedFills(strokeIndices(inside: points)))
         case .moving, .resizing:
             interaction = .idle
             dropSelection()
@@ -411,7 +559,8 @@ final class LassoSelectionController: NSObject, UIGestureRecognizerDelegate {
 
         let scale = min(max(zoom * (hostView?.traitCollection.displayScale ?? 2), 1), 4)
         var image = UIImage()
-        UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+        // Same appearance as the canvas, so lifted ink looks identical on light or dark paper.
+        canvasView.traitCollection.performAsCurrent {
             image = PKDrawing(strokes: lifted).image(from: liftedImageBounds, scale: scale)
         }
         overlay.floatingImage = image

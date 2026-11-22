@@ -159,6 +159,16 @@ final class ApplePencilManager {
     private(set) var previousTool: DrawingToolKind
     private(set) var toolSettings: [DrawingToolKind: ToolSettings]
     private(set) var eraserMode: EraserMode
+    /// Quick-pick colors on the toolbar, editable by the user (stored as light-paper ink colors).
+    private(set) var penSwatches: [RGBAColor]
+    private(set) var highlighterSwatches: [RGBAColor]
+    /// Applied to new ink strokes and corrected shapes after each stroke.
+    private(set) var lineStyle: StrokeLineStyle
+
+    static let maximumSwatches = 10
+    private static let penSwatchesKey = "pencil.penSwatches"
+    private static let highlighterSwatchesKey = "pencil.highlighterSwatches"
+    private static let lineStyleKey = "pencil.lineStyle"
 
     private(set) var preferences: PencilPreferences
     private(set) var radialPalette: RadialPaletteState? = nil
@@ -190,6 +200,9 @@ final class ApplePencilManager {
         previousTool = saved?.lastInkingTool ?? .pen
         eraserMode = saved?.eraserMode ?? .object
         preferences = PencilPreferences.load(from: defaults)
+        penSwatches = Self.loadSwatches(Self.penSwatchesKey, from: defaults) ?? InkPalette.pen
+        highlighterSwatches = Self.loadSwatches(Self.highlighterSwatchesKey, from: defaults) ?? InkPalette.highlighter
+        lineStyle = defaults.string(forKey: Self.lineStyleKey).flatMap(StrokeLineStyle.init(rawValue:)) ?? .solid
         HapticEngine.shared.isEnabled = preferences.hapticsEnabled
     }
 
@@ -291,6 +304,89 @@ final class ApplePencilManager {
         let current = tools.firstIndex(of: activeTool) ?? -1
         select(tools[(current + 1) % tools.count])
         announceActiveTool()
+    }
+
+    // MARK: Line style
+
+    func setLineStyle(_ style: StrokeLineStyle) {
+        guard style != lineStyle else { return }
+        lineStyle = style
+        defaults.set(style.rawValue, forKey: Self.lineStyleKey)
+    }
+
+    // MARK: Toolbar colors
+
+    /// The highlighter has its own row of colors; every other ink shares the pen row.
+    func swatches(for tool: DrawingToolKind) -> [RGBAColor] {
+        tool == .highlighter ? highlighterSwatches : penSwatches
+    }
+
+    func canAddSwatch(_ color: RGBAColor, for tool: DrawingToolKind) -> Bool {
+        let current = swatches(for: tool)
+        return current.count < Self.maximumSwatches && !current.contains { $0.isClose(to: color) }
+    }
+
+    func addSwatch(_ color: RGBAColor, for tool: DrawingToolKind) {
+        guard canAddSwatch(color, for: tool) else { return }
+        updateSwatches(for: tool) { $0.append(color) }
+    }
+
+    func replaceSwatch(at index: Int, with color: RGBAColor, for tool: DrawingToolKind) {
+        updateSwatches(for: tool) { swatches in
+            guard swatches.indices.contains(index) else { return }
+            swatches[index] = color
+        }
+    }
+
+    /// The last color can't be removed, so the toolbar always has at least one.
+    func removeSwatch(at index: Int, for tool: DrawingToolKind) {
+        updateSwatches(for: tool) { swatches in
+            guard swatches.count > 1, swatches.indices.contains(index) else { return }
+            swatches.remove(at: index)
+        }
+    }
+
+    /// Moves a swatch one place left (`-1`) or right (`+1`).
+    func moveSwatch(at index: Int, by offset: Int, for tool: DrawingToolKind) {
+        updateSwatches(for: tool) { swatches in
+            let destination = index + offset
+            guard swatches.indices.contains(index), swatches.indices.contains(destination) else { return }
+            swatches.swapAt(index, destination)
+        }
+    }
+
+    func resetSwatches() {
+        penSwatches = InkPalette.pen
+        highlighterSwatches = InkPalette.highlighter
+        defaults.removeObject(forKey: Self.penSwatchesKey)
+        defaults.removeObject(forKey: Self.highlighterSwatchesKey)
+    }
+
+    private func updateSwatches(for tool: DrawingToolKind, _ change: (inout [RGBAColor]) -> Void) {
+        if tool == .highlighter {
+            var updated = highlighterSwatches
+            change(&updated)
+            highlighterSwatches = updated
+            Self.saveSwatches(updated, Self.highlighterSwatchesKey, to: defaults)
+        } else {
+            var updated = penSwatches
+            change(&updated)
+            penSwatches = updated
+            Self.saveSwatches(updated, Self.penSwatchesKey, to: defaults)
+        }
+    }
+
+    private static func loadSwatches(_ key: String, from defaults: UserDefaults) -> [RGBAColor]? {
+        guard let data = defaults.data(forKey: key),
+              let swatches = try? JSONDecoder().decode([RGBAColor].self, from: data),
+              !swatches.isEmpty else { return nil }
+        return swatches
+    }
+
+    private static func saveSwatches(_ swatches: [RGBAColor], _ key: String, to defaults: UserDefaults) {
+        if let data = try? JSONEncoder().encode(swatches) {
+            defaults.set(data, forKey: key)
+        }
     }
 
     // MARK: Radial palette

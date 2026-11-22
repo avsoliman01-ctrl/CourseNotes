@@ -20,6 +20,22 @@ final class CanvasController {
         container?.selection.recolorSelection(color.uiColor)
     }
 
+    /// Returns false when the selection has no closed shape (or fill) to paint.
+    @discardableResult
+    func fillSelection(_ color: RGBAColor, style: FillStyle) -> Bool {
+        container?.selection.fillSelection(with: color.uiColor, style: style) ?? false
+    }
+
+    @discardableResult
+    func removeFillFromSelection() -> Bool {
+        container?.selection.removeFillFromSelection() ?? false
+    }
+
+    @discardableResult
+    func setSelectionLineStyle(_ style: StrokeLineStyle) -> Bool {
+        container?.selection.setLineStyle(style) ?? false
+    }
+
     func deleteSelection() {
         container?.selection.deleteSelection()
     }
@@ -82,6 +98,8 @@ struct PencilCanvasView: UIViewRepresentable {
     let showsHoverReticle: Bool
     let shapeHoldEnabled: Bool
     let smoothing: SmoothingStrength
+    let lineStyle: StrokeLineStyle
+    let paperAppearance: PaperAppearance
     let controller: CanvasController
     let pencil: ApplePencilManager
     let onDrawingChange: @MainActor (PKDrawing) -> Void
@@ -100,6 +118,7 @@ struct PencilCanvasView: UIViewRepresentable {
         canvas.delegate = coordinator
         canvas.drawingPolicy = drawingPolicy
         container.template = template
+        container.paperAppearance = paperAppearance
         coordinator.container = container
         coordinator.apply(tool)
 
@@ -137,6 +156,10 @@ struct PencilCanvasView: UIViewRepresentable {
     func updateUIView(_ container: CanvasContainerView, context: Context) {
         context.coordinator.parent = self
         container.template = template
+        if container.paperAppearance != paperAppearance {
+            container.paperAppearance = paperAppearance
+            context.coordinator.appearanceChanged()
+        }
         context.coordinator.apply(tool)
         if container.canvasView.drawingPolicy != drawingPolicy {
             container.canvasView.drawingPolicy = drawingPolicy
@@ -171,6 +194,13 @@ struct PencilCanvasView: UIViewRepresentable {
             self.parent = parent
         }
 
+        /// The reticle shows ink as it displays on the current paper; refresh it on a switch.
+        func appearanceChanged() {
+            guard let container, let tool = appliedTool else { return }
+            container.reticleView.configure(for: tool, appearance: parent.paperAppearance)
+            container.selection.refreshOverlay()
+        }
+
         func apply(_ tool: ToolConfiguration) {
             guard tool != appliedTool, let container else { return }
             appliedTool = tool
@@ -180,7 +210,7 @@ struct PencilCanvasView: UIViewRepresentable {
             if tool.kind != .lasso {
                 container.canvasView.tool = tool.pkTool
             }
-            container.reticleView.configure(for: tool)
+            container.reticleView.configure(for: tool, appearance: parent.paperAppearance)
             // The lasso is this app's own selection layer; it takes the pencil while active.
             container.selection.setEnabled(tool.kind == .lasso)
             configureAssistant(in: container)
@@ -193,8 +223,9 @@ struct PencilCanvasView: UIViewRepresentable {
             assistant.smoothing = parent.smoothing
             assistant.allowsFingerInput = parent.drawingPolicy == .anyInput
             assistant.isInkingToolActive = parent.tool.kind.isInking
-            assistant.previewColor = parent.tool.color.uiColor
+            assistant.previewColor = parent.tool.color.displayedUIColor(on: parent.paperAppearance)
             assistant.previewWidth = parent.tool.width
+            assistant.lineStyle = parent.lineStyle
         }
 
         func observeUndo(of canvasView: PKCanvasView) {

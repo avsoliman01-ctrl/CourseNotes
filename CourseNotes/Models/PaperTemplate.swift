@@ -46,15 +46,49 @@ enum PaperTemplate: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// Colors and spacing of the printed-paper look. Spacing is in canvas content points.
-enum PaperStyle {
-    static let paper = UIColor.white
-    static let ruleLine = UIColor(red: 0.55, green: 0.70, blue: 0.88, alpha: 0.80)
-    static let marginLine = UIColor(red: 0.90, green: 0.38, blue: 0.40, alpha: 0.75)
-    static let gridMinor = UIColor(red: 0.55, green: 0.70, blue: 0.88, alpha: 0.40)
-    static let gridMajor = UIColor(red: 0.42, green: 0.60, blue: 0.84, alpha: 0.65)
-    static let dot = UIColor(white: 0.55, alpha: 0.85)
+/// Light (white) or dark (black) paper. Ink follows along: PencilKit stores light-mode colors and
+/// adapts them for display when its view is in dark appearance (black ink shows as white).
+enum PaperAppearance: Equatable {
+    case light, dark
 
+    var colors: PaperColors { self == .dark ? .dark : .light }
+    var interfaceStyle: UIUserInterfaceStyle { self == .dark ? .dark : .light }
+    var traitCollection: UITraitCollection { UITraitCollection(userInterfaceStyle: interfaceStyle) }
+}
+
+struct PaperColors {
+    let paper: UIColor
+    let ruleLine: UIColor
+    let marginLine: UIColor
+    let gridMinor: UIColor
+    let gridMajor: UIColor
+    let dot: UIColor
+    let pageBreak: UIColor
+
+    static let light = PaperColors(
+        paper: .white,
+        ruleLine: UIColor(red: 0.55, green: 0.70, blue: 0.88, alpha: 0.80),
+        marginLine: UIColor(red: 0.90, green: 0.38, blue: 0.40, alpha: 0.75),
+        gridMinor: UIColor(red: 0.55, green: 0.70, blue: 0.88, alpha: 0.40),
+        gridMajor: UIColor(red: 0.42, green: 0.60, blue: 0.84, alpha: 0.65),
+        dot: UIColor(white: 0.55, alpha: 0.85),
+        pageBreak: UIColor(white: 0.45, alpha: 0.45)
+    )
+
+    /// Pure black paper with dimmed rules, so the page reads like the light one inverted.
+    static let dark = PaperColors(
+        paper: .black,
+        ruleLine: UIColor(red: 0.26, green: 0.38, blue: 0.55, alpha: 0.90),
+        marginLine: UIColor(red: 0.62, green: 0.24, blue: 0.27, alpha: 0.85),
+        gridMinor: UIColor(red: 0.26, green: 0.36, blue: 0.50, alpha: 0.50),
+        gridMajor: UIColor(red: 0.32, green: 0.45, blue: 0.62, alpha: 0.75),
+        dot: UIColor(white: 0.40, alpha: 0.90),
+        pageBreak: UIColor(white: 0.55, alpha: 0.40)
+    )
+}
+
+/// Spacing of the printed-paper look, in canvas content points.
+enum PaperStyle {
     static let ruleSpacing: CGFloat = 40
     static let ruleTopMargin: CGFloat = 120
     static let marginX: CGFloat = 96
@@ -71,7 +105,7 @@ extension PaperTemplate {
     /// in the right place. `zoomScale` (device points per content point) keeps hairlines crisp
     /// when zoomed out. The same routine renders the live canvas, thumbnails and PDF pages,
     /// so all three always match.
-    func draw(in context: CGContext, contentRect: CGRect, zoomScale: CGFloat) {
+    func draw(in context: CGContext, contentRect: CGRect, zoomScale: CGFloat, colors: PaperColors = .light) {
         let page = CGRect(x: 0, y: 0, width: CanvasMetrics.pageWidth, height: 10_000_000)
         let rect = contentRect.intersection(page)
         guard self != .blank, !rect.isNull, rect.width > 0, rect.height > 0 else { return }
@@ -85,15 +119,15 @@ extension PaperTemplate {
         case .blank:
             break
         case .collegeRuled:
-            drawRuledLines(in: context, rect: rect)
+            drawRuledLines(in: context, rect: rect, colors: colors)
         case .grid:
-            drawGrid(in: context, rect: rect, lineWidth: lineWidth)
+            drawGrid(in: context, rect: rect, lineWidth: lineWidth, colors: colors)
         case .dotGrid:
-            drawDots(in: context, rect: rect, zoomScale: zoomScale)
+            drawDots(in: context, rect: rect, zoomScale: zoomScale, colors: colors)
         }
     }
 
-    private func drawRuledLines(in context: CGContext, rect: CGRect) {
+    private func drawRuledLines(in context: CGContext, rect: CGRect, colors: PaperColors) {
         let spacing = PaperStyle.ruleSpacing
         let top = PaperStyle.ruleTopMargin
         let first = max(0, Int(ceil((rect.minY - top) / spacing)))
@@ -107,19 +141,19 @@ extension PaperTemplate {
                 path.addLine(to: CGPoint(x: rect.maxX, y: y))
             }
             context.addPath(path)
-            context.setStrokeColor(PaperStyle.ruleLine.cgColor)
+            context.setStrokeColor(colors.ruleLine.cgColor)
             context.strokePath()
         }
 
         if (rect.minX...rect.maxX).contains(PaperStyle.marginX) {
             context.move(to: CGPoint(x: PaperStyle.marginX, y: rect.minY))
             context.addLine(to: CGPoint(x: PaperStyle.marginX, y: rect.maxY))
-            context.setStrokeColor(PaperStyle.marginLine.cgColor)
+            context.setStrokeColor(colors.marginLine.cgColor)
             context.strokePath()
         }
     }
 
-    private func drawGrid(in context: CGContext, rect: CGRect, lineWidth: CGFloat) {
+    private func drawGrid(in context: CGContext, rect: CGRect, lineWidth: CGFloat, colors: PaperColors) {
         let spacing = PaperStyle.gridSpacing
         let minor = CGMutablePath()
         let major = CGMutablePath()
@@ -147,16 +181,16 @@ extension PaperTemplate {
         }
 
         context.addPath(minor)
-        context.setStrokeColor(PaperStyle.gridMinor.cgColor)
+        context.setStrokeColor(colors.gridMinor.cgColor)
         context.strokePath()
 
         context.setLineWidth(lineWidth * 1.4)
         context.addPath(major)
-        context.setStrokeColor(PaperStyle.gridMajor.cgColor)
+        context.setStrokeColor(colors.gridMajor.cgColor)
         context.strokePath()
     }
 
-    private func drawDots(in context: CGContext, rect: CGRect, zoomScale: CGFloat) {
+    private func drawDots(in context: CGContext, rect: CGRect, zoomScale: CGFloat, colors: PaperColors) {
         let spacing = PaperStyle.dotSpacing
         // Keep dots visible (at least ~1 device point across) when zoomed out.
         let radius = max(PaperStyle.dotRadius, 0.6 / max(zoomScale, 0.01))
@@ -175,7 +209,7 @@ extension PaperTemplate {
             }
         }
         context.addPath(path)
-        context.setFillColor(PaperStyle.dot.cgColor)
+        context.setFillColor(colors.dot.cgColor)
         context.fillPath()
     }
 }
