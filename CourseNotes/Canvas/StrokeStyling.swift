@@ -188,7 +188,7 @@ enum StrokeStyling {
         }
 
         return PKStroke(ink: PKInk(.monoline, color: fillColor),
-                        strokePath: PKStrokePath(controlPoints: points, creationDate: Date()),
+                        path: PKStrokePath(controlPoints: points, creationDate: Date()),
                         transform: .identity,
                         mask: UIBezierPath(cgPath: region))
     }
